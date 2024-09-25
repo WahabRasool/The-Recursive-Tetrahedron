@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style.css">
+    <title>The Recursive Tetrahedron</title>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+<textarea id="codeEditor" class="editor" spellcheck="false" autocorrect="off" autocapitalize="off" translate="no" oninput="render()"></textarea>
+<pre id="error"></pre>
+<div id="indicator"></div>
+<div id="controls">
+  <div class="controls">
+    <input id="btnToggleView" class="icon" type="checkbox" name="toggleView" onclick="toggleView()">
+    <input id="btnToggleResolution" class="icon" type="checkbox" name="toggleResolution" onchange="toggleResolution()">
+    <input id="btnReset" class="icon" type="checkbox" name="reset" onclick="reset()">
+  </div>
+</div>
+<script type="x-shader/x-fragment">#version 300 es
+    /*********
+    * made by Matthias Hurrle (@atzedent)
+    */ 
+    precision highp float;
+    out vec4 O;
+    uniform float time;
+    uniform vec2 resolution;
+    uniform vec2 move;
+    #define FC gl_FragCoord.xy
+    #define R resolution
+    #define T (time+12.)
+    #define N normalize
+    #define S smoothstep
+    #define MN min(R.x,R.y)
+    #define rot(a) mat2(cos((a)-vec4(0,11,33,0)))
+    #define hue(a) (.25+.6*cos(6.3*(a)+vec3(0,83,21)))
+    #define lum(a) dot(vec3(.21,.71,.07),a)
+    
+    float shape(vec3 p) {
+        
+        // See details at:
+        // http://blog.hvidtfeldts.net/index.php/2011/08/distance-estimated-3d-fractals-iii-folding-space/
+        
+        float offset=1.2, n=5.;
+        
+        for (float i=.0; i++<n;) {
+            if(p.x+p.y<.0) p.xy=-p.yx; // fold 1
+            if(p.x+p.z<.0) p.xz=-p.zx; // fold 2
+            if(p.y+p.z<.0) p.zy=-p.yz; // fold 3	
+            p=2.*p-offset;
+        }
+        
+        return length(p)*pow(2.,-n)-.052;
+    }
+    
+    vec2 map(vec3 p) {
+        vec3 q=p;
+        //p.y+=.5;
+        //p.yz*=rot(-.955);
+        //p.xz*=rot(-.78);
+        vec2
+        a=vec2(shape(p),1),
+        b=vec2(q.y+1.215,0);
+        
+        a=a.x<b.x?a:b;
+        return a;
+    }
+    
+    vec3 norm(vec3 p) {
+        float h=1e-3; vec2 k=vec2(-1,1);
+        return N(
+            k.xyy*map(p+k.xyy*h).x+
+            k.yxy*map(p+k.yxy*h).x+
+            k.yyx*map(p+k.yyx*h).x+
+            k.xxx*map(p+k.xxx*h).x
+        );
+    }
+    
+    float calcAO(vec3 p, vec3 n) {
+        float o=.0, s=1.;
+        for(float i=.0; i++<5.;) {
+            float
+            h=.01+.12*i/4.,
+            d=map(p+h*n).x;
+            o+=(h-d)*s;
+            s*=.65;
+            if(o>.5) break;
+        }
+        return clamp(1.-3.*o,.0,1.)*(.5+.5*n.y);
+    }
+    
+    float shadow(vec3 p, vec3 lp) {
+        float shd=1., maxd=length(lp-p);
+        vec3 l=N(lp-p);
+        for (float i=1e-3; i<maxd;) {
+            float d=map(p+l*i).x;
+            if (d<1e-3) {
+                shd=.0;
+                break;
+            }
+            shd=min(shd,48.*d/i);
+            i+=d;
+        }
+        return shd;
+    }
+    
+    void cam(inout vec3 p) {
+        p.yz*=rot(-(sin(1.5707-move.y*6.3/MN)*.5-.5)+(cos(T*.1)*.5+.5));
+        p.xz*=rot(-move.x*6.3/MN+(sin(T*.2)*.5));
+    }
+    
+    float box(vec3 p) {
+        p=abs(p);
+        return max(max(p.x,p.y),p.z);
+    }
+    
+    void main() {
+        vec2 uv=(FC-.5*R)/MN;
+        vec3 col=vec3(0),
+        p=vec3(0,0,-10),
+        rd=N(vec3(uv,3.-exp(-cos(T*.05)*.3)));
+        cam(p); cam(rd);
+        float dd=.0;
+        for (float i=.0; i++<400.;) {
+            vec2 d=map(p);
+            if (abs(d.x)<1e-3) {
+                vec3 n=norm(p), lp=vec3(-1,4,-5), l=N(lp-p);
+                float
+                shd=shadow(p+n*3e-3,lp),
+                occ=calcAO(p+n*3e-3,n),
+                diff=clamp(dot(l,n),.0,1.),
+                ref=pow(dot(reflect(rd,n),l),64.);
+                col+=.2+diff*shd*occ;
+          // In the next line change box to either length or shape and see what happens
+                col*=1.2*hue(box(p*(d.y>.0?.65:.1))+(d.y>.0?.6-T*.05:-T*.05));
+                if (d.y>.0) col+=sqrt(max(.0,lum(col)));
+                if (ref>.0 && d.y>.0) col+=ref;
+                col/=1.+exp(-col);
+                col=sqrt(col);
+                break;
+            }
+            if (d.x>200.) break;
+            p+=rd*d.x;
+            dd+=d.x;
+        }
+        col=mix(vec3(0),col,exp(-125e-5*dd*dd));
+      O=vec4(col,1);
+    }</script>
+    <script src="./main.js"></script>
+</body>
+</html>
